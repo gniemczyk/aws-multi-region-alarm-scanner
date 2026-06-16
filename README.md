@@ -1,12 +1,12 @@
-# Skaner Alarmów Chmury AWS (Multi-Region)
+# AWS CloudWatch Skaner Alarmów (Multi-Region)
 
-Lekki, bez-dependency skrypt Python, który wykorzystuje AWS CLI i wielowątkowość do szybkiego skanowania wszystkich aktywnych regionów AWS pod kątem alarmów CloudWatch — zapewniający wysokowydajne, współbieżne monitorowanie bez zewnętrznych zależności.
+Lekki skrypt Python bez zależności, który wykorzystuje AWS CLI i wielowątkowość do szybkiego skanowania wszystkich aktywnych regionów AWS pod kątem alarmów CloudWatch — zapewniający wysokowydajne, współbieżne monitorowanie bez zewnętrznych zależności.
 
 ---
 
 ## 📌 Problem
 
-Alarmy CloudWatch są **lokalizowane regionalnie**, co oznacza, że każde odpytanie musi być wykonane osobno dla każdego regionu. Ręczne sprawdzanie wielu regionów w konsoli AWS jest uciążliwe, a synchroniczne wywołania CLI (`for region in $(aws ec2 describe-regions ...)`) są wolne i niewygodne dla kont z 20+ regionami. To opóźnienie może znacząco wpłynąć na czas reakcji na incydenty — zwłaszcza gdy potrzebujesz kompletnego obrazu całego zasobu AWS w kilka sekund.
+Alarmy CloudWatch są **lokalizowane regionalnie**, co oznacza, że każde odpytanie musi być wykonane osobno dla każdego regionu. Ręczne sprawdzanie wielu regionów w konsoli AWS jest uciążliwe, a synchroniczne wywołania CLI (`for region in $(aws ec2 describe-regions ...)`) są wolne i niewygodne dla kont obsługujących 20+ regionów. To opóźnienie może znacząco wpłynąć na czas reakcji na incydenty — zwłaszcza gdy potrzebujesz kompletnego obrazu całego zasobu AWS w kilka sekund.
 
 ---
 
@@ -16,13 +16,13 @@ Alarmy CloudWatch są **lokalizowane regionalnie**, co oznacza, że każde odpyt
   Wykorzystuje tylko bibliotekę standardową Pythona (`subprocess`, `json`, `concurrent.futures`, `logging`, `os`). Nie wymaga instalacji `pip`.
 
 - **Wysoka Wydajność dzięki Wielowątkowości**  
-  Wykonuje współbieżne skanowanie regionów przy użyciu `ThreadPoolExecutor`, drastycznie skracając czas skanowania (złożoność O(1) vs O(n) czasu rzeczywistego).
+  Wykonuje współbieżne skanowanie regionów przy użyciu `ThreadPoolExecutor`, drastycznie skracając czas skanowania — zamiast czasu liniowego O(n), osiąga złożoność O(n/workers).
 
 - **Pełny Obraz Stanu Alarmów**  
   Wyświetla WSZYSTKIE alarmy niezależnie od stanu (OK, ALARM, INSUFFICIENT_DATA), a nie tylko problemy. Elastyczne filtrowanie pozwala na wybór interesujących Cię stanów.
 
 - **Obsługa Wielu Profili**  
-  Automatycznie wykrywa wszystkie profile AWS z `~/.aws/config` i pozwala na interaktywny wybór z fallbackiem do domyślnego. Obsługuje flagę `--profile`.
+  Automatycznie wykrywa wszystkie profile AWS z `~/.aws/config` i pozwala na interaktywny wybór z rezerwą na profil domyślny. Obsługuje flagę `--profile`.
 
 - **Bezpieczeństwo od Podstaw**  
   Opiera się na lokalnie skonfigurowanych poświadczeniach AWS CLI (`~/.aws/credentials`), unikając hardkodowanych sekretów lub zewnętrznych SDK.
@@ -31,7 +31,7 @@ Alarmy CloudWatch są **lokalizowane regionalnie**, co oznacza, że każde odpyt
   Skanuj wszystkie regiony lub filtruj do wybranego. Ukryj niepotrzebne stany alarmów za pomocą flag `--skip-ok`, `--skip-alarm`, `--skip-insufficient` lub `--only-state`.
 
 - **Odporna Obsługa Błędów**  
-  Zwinie radzi sobie z brakiem AWS CLI, błędami uprawnień IAM i uszkodzonymi odpowiedziami JSON — logując działające diagnozy bez awarii.
+  Sprawnie radzi sobie z brakiem AWS CLI, błędami uprawnień IAM i uszkodzonymi odpowiedziami JSON — logując działające diagnozy bez awarii.
 
 ---
 
@@ -108,7 +108,7 @@ ap-southeast-1  | ERROR      | Błąd CLI: An error occurred (UnauthorizedOperat
 ...
 ---------------------------------------------------------------------------
 
-[ALERT] Znaleziono łącznie 1 alarmów w stanie ALARM!
+[ALERT] Znaleziono łącznie 1 alarm w stanie ALARM!
 ```
 
 ### Tryb JSON
@@ -155,7 +155,5 @@ $ python3 alarm-scanner.py --json --profile prod
 - Walidacja uprawnień IAM przed skanowaniem
 
 ---
-
-## 📄 Licencja
-
-Licencja MIT — szczegóły w pliku [LICENSE](LICENSE).
+**Autor:** Grzegorz N  
+**Data:** Czerwiec 2026
