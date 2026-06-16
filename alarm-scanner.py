@@ -17,8 +17,8 @@ def check_aws_environment(profile: Optional[str] = None):
     """Sprawdza czy AWS CLI jest dostępne i czy poświadczenia są poprawne."""
     try:
         # Sprawdzenie dostępności aws cli
-        subprocess.run(["aws", "--version"], capture_output=True, check=True)
-    except (FileNotFoundError, subprocess.CalledProcessError):
+        subprocess.run(["aws", "--version"], capture_output=True, check=True, timeout=30)
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         print("Błąd: AWS CLI nie jest zainstalowane lub nie ma go w PATH.")
         sys.exit(1)
 
@@ -28,9 +28,12 @@ def check_aws_environment(profile: Optional[str] = None):
         cmd.extend(["--profile", profile])
     
     try:
-        subprocess.run(cmd, capture_output=True, check=True)
+        subprocess.run(cmd, capture_output=True, check=True, timeout=30)
     except subprocess.CalledProcessError:
         print(f"Błąd: Nie udało się uwierzytelnić w AWS. Sprawdź poświadczenia dla profilu '{profile or 'default'}'")
+        sys.exit(1)
+    except subprocess.TimeoutExpired:
+        print(f"Błąd: Timeout podczas uwierzytelniania w AWS.")
         sys.exit(1)
 
 
@@ -73,7 +76,7 @@ def select_profile(profiles: Dict[str, str]) -> Optional[str]:
         print(f"  {idx}. {profile}{region_hint}")
     
     try:
-        user_input = input(f"\nWybierz numer profilu (Enter = domyślny): ").strip()
+        user_input = input(f"\nWybierz numer profilu (Enter = domyślny, Ctrl+C = Wyjście): ").strip()
         
         if user_input == "":
             for profile in profile_list:
@@ -88,7 +91,10 @@ def select_profile(profiles: Dict[str, str]) -> Optional[str]:
         print(f"Nieprawidłowy wybór, używam domyślnego profilu.")
         return profile_list[0] if profile_list else None
         
-    except (ValueError, KeyboardInterrupt):
+    except KeyboardInterrupt:
+        print("\nWyjście.")
+        sys.exit(0)
+    except ValueError:
         print(f"Błąd wejścia, używam domyślnego profilu.")
         return profile_list[0] if profile_list else None
 
@@ -115,13 +121,16 @@ class AWSClient:
             profile=profile
         )
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
             return json.loads(result.stdout)
         except FileNotFoundError:
             logger.critical("Błąd: Narzędzie 'aws' (AWS CLI) nie jest zainstalowane w systemie lub nie ma go w PATH.")
             return []
         except subprocess.CalledProcessError as e:
             logger.error(f"Błąd AWS CLI podczas pobierania regionów: {e.stderr.strip()}")
+            return []
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout podczas pobierania regionów.")
             return []
         except json.JSONDecodeError:
             logger.error("Nie udało się sparsować odpowiedzi JSON dla regionów.")
@@ -135,12 +144,14 @@ class AWSClient:
             profile=profile
         )
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
             data = json.loads(result.stdout)
             alarms = data.get('MetricAlarms', [])
             return region, alarms, None
         except subprocess.CalledProcessError as e:
             return region, [], f"Błąd CLI: {e.stderr.strip()}"
+        except subprocess.TimeoutExpired:
+            return region, [], f"Timeout dla regionu {region}"
         except json.JSONDecodeError:
             return region, [], "Błąd formatu JSON z API"
 
@@ -211,11 +222,19 @@ def main() -> None:
             logger.warning(f"Profil '{selected_profile}' nie istnieje, używam domyślnego.")
             selected_profile = None
     else:
-        if not profiles:
+        # Sprawdź AWS_PROFILE env var
+        env_profile = os.getenv('AWS_PROFILE')
+        if env_profile:
+            selected_profile = env_profile
+        elif not profiles:
             print("Używam domyślnego profilu.")
             selected_profile = None
         else:
             selected_profile = select_profile(profiles)
+    
+    if not selected_profile:
+        print("Brak wybranego profilu. Przerywam działanie.")
+        return
     
     regions = AWSClient.get_regions(selected_profile)
     if not regions:
