@@ -112,9 +112,9 @@ class AWSClient:
     
     @classmethod
     def check_region_alarms(cls, region: str, profile: Optional[str] = None) -> Tuple[str, List[dict], Optional[str]]:
-        """Odpytuje konkretny region o aktywne alarmy przy użyciu AWS CLI."""
+        """Odpytuje konkretny region o wszystkie alarmy przy użyciu AWS CLI."""
         cmd = cls._build_cmd(
-            ["cloudwatch", "describe-alarms", "--state-value", "ALARM", "--region", region, "--output", "json"],
+            ["cloudwatch", "describe-alarms", "--region", region, "--output", "json"],
             profile=profile
         )
         try:
@@ -135,20 +135,39 @@ def print_table_header() -> None:
     print("-" * 75)
 
 
-def print_result(region: str, alarms: List[dict], error: Optional[str], show_ok: bool = True) -> int:
-    """Drukuje wynik dla jednego regionu. Zwraca liczbę znalezionych alarmów."""
+def print_result(region: str, alarms: List[dict], error: Optional[str], show_ok: bool = True, skip_states: Optional[List[str]] = None, only_state: Optional[str] = None) -> int:
+    """Drukuje wynik dla jednego regionu. Zwraca liczbę znalezionych alarmów w stanie ALARM.
+    
+    Args:
+        skip_states: Lista stanów do pominięcia (OK, ALARM, INSUFFICIENT_DATA)
+        only_state: Pokaż tylko alarmy w wybranym stanie
+    """
+    if skip_states is None:
+        skip_states = []
+    
     if error:
         print(f"{region:<15} | ERROR      | {error[:45]}")
         return 0
     
     if not alarms:
         if show_ok:
-            print(f"{region:<15} | OK         | Brak aktywnych alarmów")
+            print(f"{region:<15} | OK         | Brak alarmów")
         return 0
     
+    alarm_count = 0
     for alarm in alarms:
-        print(f"{region:<15} | ALARM      | {alarm['AlarmName']}")
-    return len(alarms)
+        state = alarm.get('StateValue', 'UNKNOWN')
+        
+        # Filtrowanie po stanach
+        if only_state and state != only_state:
+            continue
+        if state in skip_states:
+            continue
+        
+        print(f"{region:<15} | {state:<10} | {alarm['AlarmName']}")
+        if state == 'ALARM':
+            alarm_count += 1
+    return alarm_count
 
 
 def main() -> None:
@@ -156,6 +175,11 @@ def main() -> None:
     parser.add_argument("--profile", "-p", help="Nazwa profilu AWS do użycia (domyślny: domyślny)")
     parser.add_argument("--region", "-r", help="Filtruj tylko do wybranego regionu")
     parser.add_argument("--no-ok", action="store_true", help="Pomiń wyświetlanie regionów bez alarmów")
+    parser.add_argument("--skip-ok", action="store_true", help="Ukryj alarmy w stanie OK")
+    parser.add_argument("--skip-alarm", action="store_true", help="Ukryj alarmy w stanie ALARM")
+    parser.add_argument("--skip-insufficient", action="store_true", help="Ukryj alarmy w stanie INSUFFICIENT_DATA")
+    parser.add_argument("--only-state", choices=["OK", "ALARM", "INSUFFICIENT_DATA"], 
+                       help="Pokaż tylko alarmy w wybranym stanie")
     parser.add_argument("--json", action="store_true", help="Wydajność JSON zamiast tabeli")
     args = parser.parse_args()
     
@@ -185,6 +209,15 @@ def main() -> None:
             logger.warning(f"Region '{args.region}' nie istnieje lub nie jest aktywny.")
             return
     
+    # Budowanie listy stanów do pominięcia
+    skip_states = []
+    if args.skip_ok:
+        skip_states.append("OK")
+    if args.skip_alarm:
+        skip_states.append("ALARM")
+    if args.skip_insufficient:
+        skip_states.append("INSUFFICIENT_DATA")
+    
     if args.json:
         print(f"\nSprawdzanie {len(regions)} regionów...")
         print(f"Profil: {selected_profile or 'default'}")
@@ -194,9 +227,16 @@ def main() -> None:
             region_results = executor.map(lambda r: AWSClient.check_region_alarms(r, selected_profile), regions)
             
             for region, alarms, error in region_results:
+                if error:
+                    status = "ERROR"
+                elif not alarms:
+                    status = "OK"
+                else:
+                    status = next((a.get("StateValue", "UNKNOWN") for a in alarms if a.get("StateValue") == "ALARM"), "OK")
+                
                 result_entry = {
                     "region": region,
-                    "status": "ERROR" if error else ("OK" if not alarms else "ALARM"),
+                    "status": status,
                     "alarms": [{"name": a["AlarmName"], "state": a.get("StateValue", "UNKNOWN")} for a in alarms] if not error else None,
                     "error": error
                 }
@@ -214,13 +254,13 @@ def main() -> None:
             region_results = executor.map(lambda r: AWSClient.check_region_alarms(r, selected_profile), regions)
             
             for region, alarms, error in region_results:
-                total_alarms += print_result(region, alarms, error, show_ok=not args.no_ok)
+                total_alarms += print_result(region, alarms, error, show_ok=not args.no_ok, skip_states=skip_states, only_state=args.only_state)
         
         print("-" * 75)
         if total_alarms == 0:
-            print("\n[SUKCES] Brak aktywnych alarmów na całym koncie.")
+            print("\n[INFO] Brak alarmów w stanie ALARM.")
         else:
-            print(f"\n[ALERT] Znaleziono łącznie {total_alarms} aktywnych alarmów!")
+            print(f"\n[ALERT] Znaleziono łącznie {total_alarms} alarmów w stanie ALARM!")
 
 
 if __name__ == "__main__":
