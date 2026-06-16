@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import configparser
 import json
 import logging
 import os
@@ -12,6 +13,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def check_aws_environment(profile: Optional[str] = None):
+    """Sprawdza czy AWS CLI jest dostępne i czy poświadczenia są poprawne."""
+    try:
+        # Sprawdzenie dostępności aws cli
+        subprocess.run(["aws", "--version"], capture_output=True, check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        print("Błąd: AWS CLI nie jest zainstalowane lub nie ma go w PATH.")
+        sys.exit(1)
+
+    # Sprawdzenie poświadczeń
+    cmd = ["aws", "sts", "get-caller-identity"]
+    if profile:
+        cmd.extend(["--profile", profile])
+    
+    try:
+        subprocess.run(cmd, capture_output=True, check=True)
+    except subprocess.CalledProcessError:
+        print(f"Błąd: Nie udało się uwierzytelnić w AWS. Sprawdź poświadczenia dla profilu '{profile or 'default'}'")
+        sys.exit(1)
+
 
 def get_aws_profiles() -> Dict[str, str]:
     """Pobiera listę konfigurowanych profili AWS z ~/.aws/config."""
@@ -21,25 +42,20 @@ def get_aws_profiles() -> Dict[str, str]:
     if not os.path.exists(config_path):
         return profiles
     
+    config = configparser.ConfigParser()
     try:
-        with open(config_path, "r") as f:
-            current_profile = None
-            for line in f:
-                line = line.strip()
-                if line.startswith("[") and line.endswith("]"):
-                    profile_part = line[1:-1]
-                    if profile_part == "default":
-                        current_profile = "default"
-                    elif profile_part.startswith("profile "):
-                        current_profile = profile_part[8:]
-                    else:
-                        current_profile = None
-                
-                if current_profile and line.startswith("region"):
-                    region_value = line.split("=", 1)[1].strip() if "=" in line else ""
-                    profiles[current_profile] = region_value
-    except Exception:
-        pass
+        config.read(config_path)
+        for section in config.sections():
+            if section == "default":
+                profile_name = "default"
+            elif section.startswith("profile "):
+                profile_name = section[8:]
+            else:
+                continue
+            
+            profiles[profile_name] = config.get(section, "region", fallback="")
+    except configparser.Error as e:
+        logger.warning(f"Błąd podczas parsowania ~/.aws/config: {e}")
     
     return profiles
 
@@ -183,6 +199,9 @@ def main() -> None:
                        help="Pokaż tylko alarmy w wybranym stanie")
     parser.add_argument("--json", action="store_true", help="Wydajność JSON zamiast tabeli")
     args = parser.parse_args()
+    
+    # Proaktywne sprawdzenie środowiska
+    check_aws_environment(args.profile)
     
     profiles = get_aws_profiles()
     
