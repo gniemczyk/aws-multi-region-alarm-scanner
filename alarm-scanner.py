@@ -257,43 +257,43 @@ def main() -> None:
     if args.skip_insufficient:
         skip_states.append("INSUFFICIENT_DATA")
     
-    if args.json:
-        print(f"\nSprawdzanie {len(regions)} regionów...")
-        print(f"Profil: {selected_profile or 'default'}")
-        results = []
+    # Gatheruj wyniki z wszystkich regionów
+    print(f"\nSprawdzanie {len(regions)} regionów...")
+    print(f"Profil: {selected_profile or 'default'}")
+    
+    region_data = []
+    with ThreadPoolExecutor(max_workers=min(10, len(regions))) as executor:
+        region_results = executor.map(lambda r: AWSClient.check_region_alarms(r, selected_profile), regions)
         
-        with ThreadPoolExecutor(max_workers=min(10, len(regions))) as executor:
-            region_results = executor.map(lambda r: AWSClient.check_region_alarms(r, selected_profile), regions)
+        for region, alarms, error in region_results:
+            region_data.append((region, alarms, error))
+    
+    # Printuj w wybranym formacie
+    if args.json:
+        results = []
+        for region, alarms, error in region_data:
+            if error:
+                status = "ERROR"
+            elif not alarms:
+                status = "OK"
+            else:
+                status = next((a.get("StateValue", "UNKNOWN") for a in alarms if a.get("StateValue") == "ALARM"), "OK")
             
-            for region, alarms, error in region_results:
-                if error:
-                    status = "ERROR"
-                elif not alarms:
-                    status = "OK"
-                else:
-                    status = next((a.get("StateValue", "UNKNOWN") for a in alarms if a.get("StateValue") == "ALARM"), "OK")
-                
-                result_entry = {
-                    "region": region,
-                    "status": status,
-                    "alarms": [{"name": a["AlarmName"], "state": a.get("StateValue", "UNKNOWN")} for a in alarms] if not error else None,
-                    "error": error
-                }
-                results.append(result_entry)
+            result_entry = {
+                "region": region,
+                "status": status,
+                "alarms": [{"name": a["AlarmName"], "state": a.get("StateValue", "UNKNOWN")} for a in alarms] if not error else None,
+                "error": error
+            }
+            results.append(result_entry)
         
         print(json.dumps(results, indent=2, ensure_ascii=False))
     else:
-        print(f"\nSprawdzanie {len(regions)} regionów (Wielkowątkowość)...")
-        print(f"Profil: {selected_profile or 'default'}")
         print_table_header()
-        
         total_alarms = 0
         
-        with ThreadPoolExecutor(max_workers=min(10, len(regions))) as executor:
-            region_results = executor.map(lambda r: AWSClient.check_region_alarms(r, selected_profile), regions)
-            
-            for region, alarms, error in region_results:
-                total_alarms += print_result(region, alarms, error, show_ok=not args.skip_no_alarm, skip_states=skip_states, only_state=args.only_state)
+        for region, alarms, error in region_data:
+            total_alarms += print_result(region, alarms, error, show_ok=not args.skip_no_alarm, skip_states=skip_states, only_state=args.only_state)
         
         print("-" * 75)
         if total_alarms == 0:
