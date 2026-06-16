@@ -262,7 +262,7 @@ def main() -> None:
         print(f"Profil: {selected_profile or 'default'}")
         results = []
         
-        with ThreadPoolExecutor(max_workers=len(regions)) as executor:
+        with ThreadPoolExecutor(max_workers=min(10, len(regions))) as executor:
             region_results = executor.map(lambda r: AWSClient.check_region_alarms(r, selected_profile), regions)
             
             for region, alarms, error in region_results:
@@ -289,7 +289,7 @@ def main() -> None:
         
         total_alarms = 0
         
-        with ThreadPoolExecutor(max_workers=len(regions)) as executor:
+        with ThreadPoolExecutor(max_workers=min(10, len(regions))) as executor:
             region_results = executor.map(lambda r: AWSClient.check_region_alarms(r, selected_profile), regions)
             
             for region, alarms, error in region_results:
