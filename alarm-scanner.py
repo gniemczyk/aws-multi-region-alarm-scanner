@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+
 def get_aws_profiles() -> Dict[str, str]:
     """Pobiera listę konfigurowanych profili AWS z ~/.aws/config."""
     config_path = os.path.expanduser("~/.aws/config")
@@ -174,7 +175,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Skaner alarmów CloudWatch w wielu regionach AWS")
     parser.add_argument("--profile", "-p", help="Nazwa profilu AWS do użycia (domyślny: domyślny)")
     parser.add_argument("--region", "-r", help="Filtruj tylko do wybranego regionu")
-    parser.add_argument("--no-ok", action="store_true", help="Pomiń wyświetlanie regionów bez alarmów")
+    parser.add_argument("--skip-no-alarm", action="store_true", help="Pomiń regiony bez alarmów")
     parser.add_argument("--skip-ok", action="store_true", help="Ukryj alarmy w stanie OK")
     parser.add_argument("--skip-alarm", action="store_true", help="Ukryj alarmy w stanie ALARM")
     parser.add_argument("--skip-insufficient", action="store_true", help="Ukryj alarmy w stanie INSUFFICIENT_DATA")
@@ -254,7 +255,7 @@ def main() -> None:
             region_results = executor.map(lambda r: AWSClient.check_region_alarms(r, selected_profile), regions)
             
             for region, alarms, error in region_results:
-                total_alarms += print_result(region, alarms, error, show_ok=not args.no_ok, skip_states=skip_states, only_state=args.only_state)
+                total_alarms += print_result(region, alarms, error, show_ok=not args.skip_no_alarm, skip_states=skip_states, only_state=args.only_state)
         
         print("-" * 75)
         if total_alarms == 0:

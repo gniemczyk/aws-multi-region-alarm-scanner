@@ -1,6 +1,6 @@
 # Skaner Alarmów Chmury AWS (Multi-Region)
 
-Lekki, bez-dependency skrypt Python, który wykorzystuje AWS CLI i wielowątkowość do szybkiego skanowania wszystkich aktywnych regionów AWS pod kątem alarmów CloudWatch w stanie `ALARM` — zapewniający wysokowydajne, współbieżne monitorowanie bez zewnętrznych zależności.
+Lekki, bez-dependency skrypt Python, który wykorzystuje AWS CLI i wielowątkowość do szybkiego skanowania wszystkich aktywnych regionów AWS pod kątem alarmów CloudWatch — zapewniający wysokowydajne, współbieżne monitorowanie bez zewnętrznych zależności.
 
 ---
 
@@ -18,6 +18,9 @@ Alarmy CloudWatch są **lokalizowane regionalnie**, co oznacza, że każde odpyt
 - **Wysoka Wydajność dzięki Wielowątkowości**  
   Wykonuje współbieżne skanowanie regionów przy użyciu `ThreadPoolExecutor`, drastycznie skracając czas skanowania (złożoność O(1) vs O(n) czasu rzeczywistego).
 
+- **Pełny Obraz Stanu Alarmów**  
+  Wyświetla WSZYSTKIE alarmy niezależnie od stanu (OK, ALARM, INSUFFICIENT_DATA), a nie tylko problemy. Elastyczne filtrowanie pozwala na wybór interesujących Cię stanów.
+
 - **Obsługa Wielu Profili**  
   Automatycznie wykrywa wszystkie profile AWS z `~/.aws/config` i pozwala na interaktywny wybór z fallbackiem do domyślnego. Obsługuje flagę `--profile`.
 
@@ -25,7 +28,7 @@ Alarmy CloudWatch są **lokalizowane regionalnie**, co oznacza, że każde odpyt
   Opiera się na lokalnie skonfigurowanych poświadczeniach AWS CLI (`~/.aws/credentials`), unikając hardkodowanych sekretów lub zewnętrznych SDK.
 
 - **Elastyczne Filtrowanie**  
-  Skanuj wszystkie regiony lub filtruj do wybranego za pomocą `--region`.
+  Skanuj wszystkie regiony lub filtruj do wybranego. Ukryj niepotrzebne stany alarmów za pomocą flag `--skip-ok`, `--skip-alarm`, `--skip-insufficient` lub `--only-state`.
 
 - **Odporna Obsługa Błędów**  
   Zwinie radzi sobie z brakiem AWS CLI, błędami uprawnień IAM i uszkodzonymi odpowiedziami JSON — logując działające diagnozy bez awarii.
@@ -68,11 +71,17 @@ python3 alarm-scanner.py -r eu-west-1
 # Wyjście w formacie JSON
 python3 alarm-scanner.py --json
 
-# Pomiń wyświetlanie regionów bez alarmów
-python3 alarm-scanner.py --no-ok
+# Filtrowanie stanów alarmów
+python3 alarm-scanner.py --skip-ok              # Ukryj OK, pokaż problemy
+python3 alarm-scanner.py --skip-alarm           # Ukryj ALARM
+python3 alarm-scanner.py --skip-insufficient    # Ukryj INSUFFICIENT_DATA
+python3 alarm-scanner.py --only-state ALARM     # Pokaż TYLKO ALARM
 
-# Kombinacja: konkretny profil, jeden region, bez "OK"
-python3 alarm-scanner.py --profile prod --region us-east-1 --no-ok
+# Pomiń regiony bez alarmów
+python3 alarm-scanner.py --skip-no-alarm
+
+# Kombinacja: konkretny profil, jeden region, bez OK
+python3 alarm-scanner.py --profile prod --region us-east-1 --skip-ok
 ```
 
 ---
@@ -93,13 +102,13 @@ Profil: default
 REGION          | STAN       | NAZWA ALARMU
 ---------------------------------------------------------------------------
 us-east-1       | ALARM      | high-cpu-alarm-prod
-us-west-2       | ALARM      | disk-space-critical
-eu-west-1       | OK         | Brak aktywnych alarmów
+us-west-2       | OK         | disk-space-monitor
+eu-west-1       | OK         | Brak alarmów
 ap-southeast-1  | ERROR      | Błąd CLI: An error occurred (UnauthorizedOperation)
 ...
 ---------------------------------------------------------------------------
 
-[ALERT] Znaleziono łącznie 2 aktywnych alarmów!
+[ALERT] Znaleziono łącznie 1 alarmów w stanie ALARM!
 ```
 
 ### Tryb JSON
@@ -124,7 +133,12 @@ $ python3 alarm-scanner.py --json --profile prod
   {
     "region": "us-west-2",
     "status": "OK",
-    "alarms": [],
+    "alarms": [
+      {
+        "name": "disk-space-monitor",
+        "state": "OK"
+      }
+    ],
     "error": null
   }
 ]
