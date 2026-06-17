@@ -29,6 +29,14 @@ Alarmy CloudWatch są lokalizowane regionalnie — każde odpytanie musi być wy
 
 ---
 
+## 🧪 Testy
+
+```bash
+pytest tests/test-alarm-scanner.py
+```
+
+---
+
 ## 💻 Szybki Start
 
 ```bash
