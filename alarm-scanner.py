@@ -38,28 +38,36 @@ def check_aws_environment(profile: Optional[str] = None):
 
 
 def get_aws_profiles() -> Dict[str, str]:
-    """Pobiera listę konfigurowanych profili AWS z ~/.aws/config."""
+    """Pobiera listę profili AWS z ~/.aws/config i ~/.aws/credentials."""
+    profiles: Dict[str, str] = {}
+
     config_path = os.path.expanduser("~/.aws/config")
-    profiles = {}
-    
-    if not os.path.exists(config_path):
-        return profiles
-    
-    config = configparser.ConfigParser()
-    try:
-        config.read(config_path)
-        for section in config.sections():
-            if section == "default":
-                profile_name = "default"
-            elif section.startswith("profile "):
-                profile_name = section[8:]
-            else:
-                continue
-            
-            profiles[profile_name] = config.get(section, "region", fallback="")
-    except configparser.Error as e:
-        logger.warning(f"Błąd podczas parsowania ~/.aws/config: {e}")
-    
+    if os.path.exists(config_path):
+        config = configparser.ConfigParser()
+        try:
+            config.read(config_path)
+            for section in config.sections():
+                if section == "default":
+                    profile_name = "default"
+                elif section.startswith("profile "):
+                    profile_name = section[8:]
+                else:
+                    continue
+
+                profiles[profile_name] = config.get(section, "region", fallback="")
+        except configparser.Error as e:
+            logger.warning(f"Błąd podczas parsowania ~/.aws/config: {e}")
+
+    credentials_path = os.path.expanduser("~/.aws/credentials")
+    if os.path.exists(credentials_path):
+        credentials = configparser.ConfigParser()
+        try:
+            credentials.read(credentials_path)
+            for section in credentials.sections():
+                profiles.setdefault(section, "")
+        except configparser.Error as e:
+            logger.warning(f"Błąd podczas parsowania ~/.aws/credentials: {e}")
+
     return profiles
 
 
@@ -79,9 +87,8 @@ def select_profile(profiles: Dict[str, str]) -> Optional[str]:
         user_input = input(f"\nWybierz numer profilu (Enter = domyślny, Ctrl+C = Wyjście): ").strip()
         
         if user_input == "":
-            for profile in profile_list:
-                if "default" in profile.lower():
-                    return profile
+            if "default" in profiles:
+                return "default"
             return profile_list[0] if profile_list else None
         
         choice = int(user_input)
@@ -139,14 +146,23 @@ class AWSClient:
     @classmethod
     def check_region_alarms(cls, region: str, profile: Optional[str] = None) -> Tuple[str, List[dict], Optional[str]]:
         """Odpytuje konkretny region o wszystkie alarmy przy użyciu AWS CLI."""
-        cmd = cls._build_cmd(
-            ["cloudwatch", "describe-alarms", "--region", region, "--output", "json"],
-            profile=profile
-        )
+        alarms: List[dict] = []
+        next_token: Optional[str] = None
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
-            data = json.loads(result.stdout)
-            alarms = data.get('MetricAlarms', [])
+            while True:
+                kwargs = {"starting_token": next_token} if next_token else {}
+                cmd = cls._build_cmd(
+                    ["cloudwatch", "describe-alarms", "--region", region, "--output", "json"],
+                    profile=profile,
+                    **kwargs,
+                )
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
+                data = json.loads(result.stdout)
+                alarms.extend(data.get("MetricAlarms", []))
+                alarms.extend(data.get("CompositeAlarms", []))
+                next_token = data.get("NextToken")
+                if not next_token:
+                    break
             return region, alarms, None
         except subprocess.CalledProcessError as e:
             return region, [], f"Błąd CLI: {e.stderr.strip()}"
@@ -210,19 +226,12 @@ def main() -> None:
                        help="Pokaż tylko alarmy w wybranym stanie")
     parser.add_argument("--json", action="store_true", help="Wydajność JSON zamiast tabeli")
     args = parser.parse_args()
-    
-    # Proaktywne sprawdzenie środowiska
-    check_aws_environment(args.profile)
-    
+
     profiles = get_aws_profiles()
-    
+
     if args.profile:
         selected_profile = args.profile
-        if selected_profile not in profiles and selected_profile != "default":
-            logger.warning(f"Profil '{selected_profile}' nie istnieje, używam domyślnego.")
-            selected_profile = None
     else:
-        # Sprawdź AWS_PROFILE env var
         env_profile = os.getenv('AWS_PROFILE')
         if env_profile:
             selected_profile = env_profile
@@ -231,11 +240,9 @@ def main() -> None:
             selected_profile = None
         else:
             selected_profile = select_profile(profiles)
-    
-    if not selected_profile:
-        print("Brak wybranego profilu. Przerywam działanie.")
-        return
-    
+
+    check_aws_environment(selected_profile)
+
     regions = AWSClient.get_regions(selected_profile)
     if not regions:
         print("Brak dostępu do regionów lub błąd konfiguracji. Przerywam działanie.")
